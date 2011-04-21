@@ -152,6 +152,30 @@ sub _Get {
   $res;
 }
 
+=head3 Increment
+
+ my $new_foo = $config->foo->Increment;
+ my $new_foo = $config->Increment("foo");
+
+Add one to an existing value then store and return the new value. If the
+value does not exist, stores and returns 1.
+
+=cut
+
+sub Increment {
+  my ($self, $path) = @_;
+  my $val;
+  if ($path) {
+    $val = 1 + ($self->Get( $path ) || 0);
+    $self->Set( $path, $val );
+  } else {
+    $path = $self->Namespace || die "Empty Namespace";
+    $val = 1 + ($self->_Get( '=' => $path )->[0][1] || 0);
+    $self->_Set( $path, $val );
+  }
+  return $val;
+}
+
 sub Set {
   my ($self, %val) = @_;
   my @set;
