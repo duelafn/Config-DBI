@@ -138,18 +138,11 @@ sub Get {
   }
 }
 
-sub _Get {
-  my ($self, $op, $path) = @_;
-  my $dbh = $self->DBH;
-  my $smt = $$self{_Cache}{Get}{$op} ||= do {
-    my $table   = $dbh->quote_identifier( $self->Table );
-    my $key_col = $dbh->quote_identifier( $self->KeyColumn );
-    my $val_col = $dbh->quote_identifier( $self->ValueColumn );
-    $dbh->prepare( "SELECT $key_col, $val_col FROM $table WHERE $key_col $op ?" );
-  };
-  $smt->execute($path);
-  my $res = $smt->fetchall_arrayref;
-  $res;
+sub Set {
+  my ($self, %val) = @_;
+  my @set;
+  push @set, $self->_Nested2Values( $val{$_}, $self->Path($_) ) for keys %val;
+  $self->_Set( @$_ ) for @set;
 }
 
 =head3 Increment
@@ -176,11 +169,40 @@ sub Increment {
   return $val;
 }
 
-sub Set {
-  my ($self, %val) = @_;
-  my @set;
-  push @set, $self->_Nested2Values( $val{$_}, $self->Path($_) ) for keys %val;
-  $self->_Set( @$_ ) for @set;
+=head3 Subspace
+
+ my $foo_config = $config->Subspace( "foo" );
+ my $foo_config = $config->foo;                # if $foo_config used as object
+
+Returns new config object which sets and gets values from a namespace (as
+delimited by C<NamespaceSeparator>). Croaks if C<NamespaceSeparator> is
+undefined.
+
+=cut
+
+sub Subspace {
+  my ($self, @space) = @_;
+  my $sub = bless { %$self }, ref($self);
+  $sub->Namespace( $self->Namespace, @space );
+  return $sub;
+}
+
+=head1 INTERNAL METHODS
+
+=cut
+
+sub _Get {
+  my ($self, $op, $path) = @_;
+  my $dbh = $self->DBH;
+  my $smt = $$self{_Cache}{Get}{$op} ||= do {
+    my $table   = $dbh->quote_identifier( $self->Table );
+    my $key_col = $dbh->quote_identifier( $self->KeyColumn );
+    my $val_col = $dbh->quote_identifier( $self->ValueColumn );
+    $dbh->prepare( "SELECT $key_col, $val_col FROM $table WHERE $key_col $op ?" );
+  };
+  $smt->execute($path);
+  my $res = $smt->fetchall_arrayref;
+  $res;
 }
 
 sub _Set {
@@ -199,14 +221,6 @@ sub _Set {
     or
   carp "Error Updating table";
 }
-
-sub Subspace {
-  my ($self, @space) = @_;
-  my $sub = bless { %$self }, ref($self);
-  $sub->Namespace( $self->Namespace, @space );
-  return $sub;
-}
-
 
 sub _Nested2Values {
   my ($self, $val, @path) = @_;
