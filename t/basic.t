@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 use strict; use warnings; use 5.010;
-use Test::More tests => 14;
+use Test::More tests => 17;
 use lib 'lib';
 
 BEGIN{ use_ok 'Config::DBI' };
@@ -24,6 +24,20 @@ is "".$config->Get("user.name"), "Bob Smiley", "Subspace setter creates";
 is "".$config->user->name, "Bob Smiley", "Subspace setter creates";
 
 
+my %flat = $config->GetFlatHash;
+my %flat_expected =
+  ( first_name => "Bob",
+    "user.name" => "Bob Smiley",
+  );
+
+is_deeply \%flat, \%flat_expected, "GetFlatHash";
+
+$config->Delete( "first_name" );
+my $flat = $config->GetFlatHash("*");
+is_deeply $flat, { "user.name" => "Bob Smiley" }, "Delete";
+
+
+
 my $config2 = Config::DBI->Open( "test_populated.sqlite", Table => 'myconfig' );
 is "".$config2->foo, 1, "Simple getter 1";
 is "".$config2->bar, 2, "Simple getter 2";
@@ -32,6 +46,7 @@ is $config2->baz->Increment, 4, "Increment";
 is $config2->wooka->Increment, 1, "Increment non-existant";
 is $config2->Increment("wooka"), 2, "Increment(key) and increment check";
 is $config2->Increment("wooka"), 3, "Increment(key) increments";
+is $config2->Decrement("wooka"), 2, "Decrement(key) decrements";
 
 is "".$config2->Get("user.name"), "Bob Smiley", "Simple getter 3";
 

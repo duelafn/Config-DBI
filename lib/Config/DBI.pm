@@ -62,6 +62,7 @@ sub AUTOLOAD {
       $self->Set( $meth, @_ );
     } else {
       return OBJREF  { $self->Subspace($meth) }
+             HASHREF { $self->Get() }
              DEFAULT { $self->Get($meth) }
     }
   };
@@ -118,15 +119,45 @@ sub Path {
   join $sep, @path;
 }
 
+=head3 Get
+
+ my $all = $config->Get;
+ my %all = $config->Get;
+ my $name = $config->Get( "user.name" );
+
+ my %user = $config->Get( "user.*" );
+ # sample %user:
+ # { "user.name" => "Bob Smiley",
+ #   "user.addr" => { street => "1234 Main St.",
+ #                    city   => "MyCity",
+ #                    state  => "MyState",
+ #                  },
+ # }
+
+ my %user = $config->user->Get;
+ my %user = $config->user->Get( "*" ); # same as previous line
+ # sample %user:
+ # { "name" => "Bob Smiley",
+ #   "addr" => { street => "1234 Main St.",
+ #               city   => "MyCity",
+ #               state  => "MyState",
+ #             },
+ # }
+
+Get single value from the database. Deep values (hash of hash) are
+extracted if C<UseStarGlob> option is set.
+
+=cut
+
 sub Get {
   my ($self, $path) = @_;
   $path //= "*";
   my $fullpath = $self->Path($path);
-  my $sep = $self->NamespaceSeparator;
   if ($self->UseStarGlob and $fullpath =~ s/\*/%/g) {
     my $res = $self->_Get( LIKE => $fullpath );
     my $hash = $self->_Values2Nested( @$res );
     if ($self->Namespace) {
+      my $sep = $self->NamespaceSeparator;
       $hash = GETPATH( $hash, split /\Q$sep\E/, $self->Namespace );
     }
     return wantarray ? %$hash : $hash;
@@ -138,6 +169,49 @@ sub Get {
   }
 }
 
+=head3 GetFlatHash
+
+ my $all = $config->GetFlatHash;
+ my %all = $config->GetFlatHash;
+ my %user = $config->GetFlatHash("user.*");
+ # sample %user:
+ # { "user.name" => "Bob Smiley",
+ #   "user.addr.street" => "1234 Main St.",
+ #   "user.addr.city"   => "MyCity",
+ #   "user.addr.state"  => "MyState",
+ # }
+
+Get values from the database without expanding hash of hash recursions.
+
+=cut
+
+sub GetFlatHash {
+  my $self = shift;
+  @_ = ("*") if !@_ and $self->UseStarGlob;
+  my %vals;
+  for (@_) {
+    my $fullpath = $self->Path($_);
+    my $res;
+    if ($self->UseStarGlob and $fullpath =~ s/\*/%/g) {
+      $res = $self->_Get( LIKE => $fullpath );
+    } else {
+      $res = $self->_Get( '=' => $fullpath );
+      carp "Multiple results found for $_" if @$res > 1;
+    }
+    $vals{$$_[0]} = $$_[1] for @$res;
+  }
+  return wantarray ? %vals : \%vals;
+}
+
+=head3 Delete
+
+ $config->Set( %values );
+
+Sets keys to given values. Operates recursively as long as
+C<NamespaceSeparator> is defined.
+
+=cut
+
 sub Set {
   my ($self, %val) = @_;
   my @set;
@@ -145,25 +219,66 @@ sub Set {
   $self->_Set( @$_ ) for @set;
 }
 
+=head3 Delete
+
+ $config->foo->Delete;
+ $config->Delete("foo.*");
+ $config->Delete("key1", "key2", ...);
+
+Delete keys. When called with no arguments, deletes entire current
+namespace. When called with arguments deletes the given keys (with glob
+expansion if C<UseStarGlob> is set).
+
+=cut
+
+sub Delete {
+  my $self = shift;
+  @_ = ("*") unless @_;
+  for my $path (@_) {
+    next unless defined $path;
+    my $fullpath = $self->Path($path);
+    if ($self->UseStarGlob and $fullpath =~ s/\*/%/g) {
+      $self->_Delete( LIKE => $fullpath );
+    } else {
+      $self->_Delete( '=' => $fullpath );
+    }
+  }
+}
+
 =head3 Increment
+
+=head3 Decrement
 
  my $new_foo = $config->foo->Increment;
  my $new_foo = $config->Increment("foo");
 
-Add one to an existing value then store and return the new value. If the
-value does not exist, stores and returns 1.
+Add/Subtract one to an existing value then store and return the new value.
+If the value does not exist, stores and returns ±1.
 
 =cut
 
-sub Increment {
-  my ($self, $path) = @_;
+sub Increment { shift->AddToVal( $_[0],  1 ) }
+sub Decrement { shift->AddToVal( $_[0], -1 ) }
+
+=head3 AddToVal
+
+ my $new_foo = $config->foo->AddToVal( 5 );
+ my $new_foo = $config->AddToVal("foo", 5);
+
+Add to an existing value then store and return the new value. If the value
+does not exist, stores and returns the added value.
+
+=cut
+
+sub AddToVal {
+  my ($self, $path, $delta) = @_;
   my $val;
   if ($path) {
-    $val = 1 + ($self->Get( $path ) || 0);
+    $val = $delta + ($self->Get( $path ) || 0);
     $self->Set( $path, $val );
   } else {
     $path = $self->Namespace || die "Empty Namespace";
-    $val = 1 + ($self->_Get( '=' => $path )->[0][1] || 0);
+    $val = $delta + ($self->_Get( '=' => $path )->[0][1] || 0);
     $self->_Set( $path, $val );
   }
   return $val;
@@ -201,8 +316,7 @@ sub _Get {
     $dbh->prepare( "SELECT $key_col, $val_col FROM $table WHERE $key_col $op ?" );
   };
   $smt->execute($path);
-  my $res = $smt->fetchall_arrayref;
-  $res;
+  $smt->fetchall_arrayref;
 }
 
 sub _Set {
@@ -220,6 +334,17 @@ sub _Set {
   0+$$self{_Cache}{Set}{ins}->execute($path, $value)
     or
   carp "Error Updating table";
+}
+
+sub _Delete {
+  my ($self, $op, $path) = @_;
+  my $dbh = $self->DBH;
+  my $smt = $$self{_Cache}{Delete}{$op} ||= do {
+    my $table   = $dbh->quote_identifier( $self->Table );
+    my $key_col = $dbh->quote_identifier( $self->KeyColumn );
+    $dbh->prepare( "DELETE FROM $table WHERE $key_col $op ?" );
+  };
+  $smt->execute($path);
 }
 
 sub _Nested2Values {
