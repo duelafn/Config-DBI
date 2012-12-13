@@ -23,6 +23,10 @@ Config::DBI - DBI based configuration storage
  my $name = $config->first_name;
  $config->last_name( "Smith" );
 
+ # Simple namespaces:
+ my $foo_config = $config->foo;
+ $foo_config->bar("baz");
+
  # deep hashes:
  $config->user->name("Bob");
  my $user = $config->Get( "user.*" )->{user};

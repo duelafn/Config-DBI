@@ -1,0 +1,26 @@
+
+Config::DBI - DBI based configuration storage
+
+NOTE: this module has a name conflict with a module on CPAN. I will get
+around to fixing this some day.
+
+
+Connects to an SQLite Database and stores deep hashes.
+
+ use strict;
+ use Config::DBI;
+ my $config = Config::DBI->Open( $sqlite_file );
+
+ # simple persistant hash
+ my $name = $config->first_name;
+ $config->last_name( "Smith" );
+
+ # Simple namespaces:
+ my $foo_config = $config->foo;
+ $foo_config->bar("baz");
+
+ # deep hashes:
+ $config->user->name("Bob");
+ my $user = $config->Get( "user.*" )->{user};
+ my %user = $config->user->Get;
+ say $user{name};
