@@ -1,6 +1,6 @@
 package Config::DBI;
 use strict; use warnings; use re 'taint'; use autodie; use 5.010;
-our $VERSION = 0.0001;# Created: 2011-04-20
+our $VERSION = 1.0.0;
 use Carp;
 use Contextual::Return;
 use DBI;
@@ -355,16 +355,16 @@ sub _Nested2Values {
   my ($self, $val, @path) = @_;
   my @vals;
 
-  given (ref($val)) {
-    when ('HASH') {
+  for my $ref (ref($val)) {
+    if ($ref eq 'HASH') {
       push @vals, $self->_Nested2Values( $$val{$_}, @path, $_ ) for keys %$val;
     }
 
-    when ('ARRAY') {
+    elsif ($ref eq 'ARRAY') {
       push @vals, $self->_Nested2Values( $$val[$_], @path, $_ ) for 0..$#{$val};
     }
 
-    default {
+    else {
       my $key;
       if (1 > @path) {
         die "Can not save value without name";
